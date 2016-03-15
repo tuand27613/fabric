@@ -20,9 +20,10 @@ under the License.
 package controller
 
 import (
+	"strings"
+
 	"github.com/op/go-logging"
 	"github.com/spf13/viper"
-	"strings"
 
 	"github.com/openblockchain/obc-peer/openchain/consensus"
 	"github.com/openblockchain/obc-peer/openchain/consensus/noops"
@@ -39,10 +40,10 @@ func init() {
 func NewConsenter(stack consensus.Stack) (consenter consensus.Consenter) {
 	plugin := strings.ToLower(viper.GetString("peer.validator.consensus"))
 	if plugin == "obcpbft" {
-		//logger.Info("Running with consensus plugin %s", plugin)
+		logger.Debug("Running with consensus plugin %s", plugin)
 		consenter = obcpbft.GetPlugin(stack)
 	} else {
-		//logger.Info("Running with default consensus plugin (noops)")
+		logger.Debug("Running with default consensus plugin (noops)")
 		consenter = noops.GetNoops(stack)
 	}
 	return
