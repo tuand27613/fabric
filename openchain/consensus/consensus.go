@@ -32,8 +32,15 @@ type Consenter interface {
 
 // Inquirer is used to retrieve info about the validating network
 type Inquirer interface {
+	GetConnectedVPs() (list *pb.PeersMessage, err error)
 	GetNetworkInfo() (self *pb.PeerEndpoint, network []*pb.PeerEndpoint, err error)
 	GetNetworkHandles() (self *pb.PeerID, network []*pb.PeerID, err error)
+}
+
+// Gatekeeper is used to manage the list of validating peers a validator should connect to
+type Gatekeeper interface {
+	GetWhitelist() (list *pb.PeersMessage, err error)
+	SetWhitelist(list *pb.PeersMessage) error
 }
 
 // Communicator is used to send messages to other validators
@@ -103,6 +110,7 @@ type LedgerStack interface {
 // Stack is the set of stack-facing methods available to the consensus plugin
 type Stack interface {
 	Inquirer
+	Gatekeeper
 	Communicator
 	SecurityUtils
 	LedgerStack
