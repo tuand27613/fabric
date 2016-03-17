@@ -23,8 +23,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	gp "google/protobuf"
+	"io/ioutil"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,6 +98,7 @@ type instance struct {
 	consenter closableConsenter
 	net       *testnet
 	ledger    consensus.LedgerStack
+	whitelist *pb.PeersMessage
 
 	deliver      func([]byte, *pb.PeerID)
 	execTxResult func([]*pb.Transaction) ([]byte, error)
@@ -173,13 +176,69 @@ func (inst *instance) viewChange(uint64) {
 }
 
 func (inst *instance) GetNetworkInfo() (self *pb.PeerEndpoint, network []*pb.PeerEndpoint, err error) {
-	panic("Not implemented yet")
+	self = &pb.PeerEndpoint{ID: inst.handle, Type: pb.PeerEndpoint_VALIDATOR}
+	network = make([]*pb.PeerEndpoint, inst.net.N)
+	for i, handle := range inst.net.handles {
+		network[i] = &pb.PeerEndpoint{ID: handle, Type: pb.PeerEndpoint_VALIDATOR}
+	}
+	return
 }
 
 func (inst *instance) GetNetworkHandles() (self *pb.PeerID, network []*pb.PeerID, err error) {
 	self = inst.handle
 	network = inst.net.handles
 	return
+}
+
+func (inst *instance) GetConnectedVPs() (list *pb.PeersMessage, err error) {
+	vPeers := []*pb.PeerEndpoint{}
+	for _, handle := range inst.net.handles {
+		if strings.Compare(handle.Name, inst.handle.Name) == 0 {
+			continue
+		}
+		vPeers = append(vPeers, &pb.PeerEndpoint{ID: handle, Type: pb.PeerEndpoint_VALIDATOR})
+	}
+	list = &pb.PeersMessage{Peers: vPeers}
+	return
+}
+
+func (inst *instance) GetWhitelist() (list *pb.PeersMessage, err error) {
+	// try reading from memory first
+	if len(inst.whitelist.GetPeers()) != 0 {
+		return inst.whitelist, nil
+	}
+
+	// otherwise, attempt to read from file
+	packedList, err := ioutil.ReadFile("/tmp/whitelist.dat")
+	if err != nil {
+		return list, fmt.Errorf("Unable to read whitelist from disk: %v", err)
+	}
+
+	list = &pb.PeersMessage{}
+	err = proto.Unmarshal(packedList, list)
+	if err != nil {
+		return list, fmt.Errorf("Unable to unmarshal whitelist file contents: %v", err)
+	}
+
+	return
+}
+
+func (inst *instance) SetWhitelist(list *pb.PeersMessage) error {
+	// set the data structure
+	inst.whitelist = list
+
+	// store to file
+	packedList, err := proto.Marshal(list)
+	if err != nil {
+		return fmt.Errorf("Unable to marshal whitelist: %v", err)
+	}
+
+	err = ioutil.WriteFile("/tmp/whitelist.dat", packedList, 0644)
+	if err != nil {
+		return fmt.Errorf("Unable to create/write whitelist file: %v", err)
+	}
+
+	return nil
 }
 
 // Broadcast delivers to all replicas.  In contrast to the stack

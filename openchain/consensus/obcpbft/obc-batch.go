@@ -41,6 +41,9 @@ type obcBatch struct {
 	batchTimer       *time.Timer
 	batchTimerActive bool
 	batchTimeout     time.Duration
+
+	isSufficientlyConnected chan bool
+	proceedWithConsensus    bool
 }
 
 func newObcBatch(id uint64, config *viper.Viper, stack consensus.Stack) *obcBatch {
@@ -57,15 +60,61 @@ func newObcBatch(id uint64, config *viper.Viper, stack consensus.Stack) *obcBatc
 	op.batchTimer = time.NewTimer(100 * time.Hour) // XXX ugly
 	op.batchTimer.Stop()
 	go op.batchTimerHander()
+
+	op.isSufficientlyConnected = make(chan bool)
+	go op.checkConnections()
+
 	return op
+}
+
+// once initialized, did we connect to all validators?
+func (op *obcBatch) checkConnections() {
+	var threshold int
+	newList := &pb.PeersMessage{}
+	vPeersMsg := &pb.PeersMessage{}
+
+	// is there an existing whitelist? if so, no need to wait until fully connected
+	list, err := op.stack.GetWhitelist()
+
+	// if there's no whitelist, it means the whole network is starting from scratch
+	if err != nil {
+		threshold = op.pbft.N - 1
+	} else {
+		threshold = 2 * op.pbft.f
+	}
+
+	for {
+		vPeersMsg, _ = op.stack.GetConnectedVPs()
+		// TODO if err == nil, need to filter them based on the whitelist
+		count := len(vPeersMsg.GetPeers())
+		if count >= threshold {
+			if err != nil { // if you're starting from scratch
+				newList = vPeersMsg
+			} else { // if you're restarting
+				newList = list
+			}
+			err = op.stack.SetWhitelist(newList) // set and save that whitelist
+			if err != nil {
+				logger.Debug("Unable to set whitelist: %v", err)
+			}
+			break
+		}
+	}
+
+	op.isSufficientlyConnected <- true
 }
 
 // RecvMsg receives both CHAIN_TRANSACTION and CONSENSUS messages from
 // the stack. New transaction requests are broadcast to all replicas,
 // so that the current primary will receive the request.
 func (op *obcBatch) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerID) error {
+	for !op.proceedWithConsensus {
+		op.proceedWithConsensus = <-op.isSufficientlyConnected
+	}
+
 	op.pbft.lock()
 	defer op.pbft.unlock()
+
 	if ocMsg.Type == pb.OpenchainMessage_CHAIN_TRANSACTION {
 		logger.Info("New consensus request received")
 
