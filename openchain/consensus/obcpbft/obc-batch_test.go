@@ -80,4 +80,9 @@ func TestNetworkBatch(t *testing.T) {
 				inst.id, numTrans, net.replicas[i].consenter.(*obcBatch).batchSize)
 		}
 	}
+
+	err = os.Remove("/tmp/whitelist.dat")
+	if err != nil {
+		t.Fatalf("Unable to delete whitelist file: %v", err)
+	}
 }
