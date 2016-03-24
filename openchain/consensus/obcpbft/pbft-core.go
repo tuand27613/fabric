@@ -61,6 +61,7 @@ type innerStack interface {
 
 	sign(msg []byte) ([]byte, error)
 	verify(senderID uint64, signature []byte, message []byte) error
+	getValidatorHandle(id uint64) (handle *protos.PeerID, err error)
 }
 
 type pbftCore struct {
@@ -222,7 +223,7 @@ func newPbftCore(id uint64, config *viper.Viper, consumer innerStack, ledger con
 	if instance.replicaCount > 1 {
 		// For some tests, only 1 replica will be present, and defaultPeerIDs makes no sense
 		for i := uint64(0); i < uint64(instance.replicaCount); i++ {
-			handle, err := getValidatorHandle(i)
+			handle, err := instance.consumer.getValidatorHandle(i)
 			if err != nil {
 				panic(fmt.Errorf("Cannot retrieve handle for peer which must exist : %s", err))
 			}
@@ -240,7 +241,7 @@ func newPbftCore(id uint64, config *viper.Viper, consumer innerStack, ledger con
 		logger.Debug("Replica %d not initializing defaultPeerIDs, as replicaCount is %d", instance.id, instance.replicaCount)
 	}
 
-	if myHandle, err := getValidatorHandle(instance.id); err != nil {
+	if myHandle, err := instance.consumer.getValidatorHandle(instance.id); err != nil {
 		panic("Could not retrieve own handle")
 	} else {
 		instance.sts = statetransfer.NewStateTransferState(myHandle, config, ledger, defaultPeerIDs)
@@ -984,7 +985,7 @@ func (instance *pbftCore) witnessCheckpoint(chkpt *Checkpoint) {
 				for replicaID, hChkpt := range instance.hChkpts {
 					if hChkpt >= m {
 						var err error
-						if furthestReplicaIds[i], err = getValidatorHandle(replicaID); nil != err {
+						if furthestReplicaIds[i], err = instance.consumer.getValidatorHandle(replicaID); nil != err {
 							panic(fmt.Errorf("Received a replicaID in a checkpoint which does not map to a peer : %s", err))
 						}
 						i++
@@ -1009,7 +1010,7 @@ func (instance *pbftCore) witnessCheckpointWeakCert(chkpt *Checkpoint) {
 	for testChkpt := range instance.checkpointStore {
 		if testChkpt.SequenceNumber == chkpt.SequenceNumber && testChkpt.BlockHash == chkpt.BlockHash {
 			var err error
-			if checkpointMembers[i], err = getValidatorHandle(testChkpt.ReplicaId); err != nil {
+			if checkpointMembers[i], err = instance.consumer.getValidatorHandle(testChkpt.ReplicaId); err != nil {
 				panic(fmt.Errorf("Received a replicaID in a checkpoint which does not map to a peer : %s", err))
 			} else {
 				logger.Debug("Replica %d adding replica %d (handle %v) to weak cert", instance.id, testChkpt.ReplicaId, checkpointMembers[i])

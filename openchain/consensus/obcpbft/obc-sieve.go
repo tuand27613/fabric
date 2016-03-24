@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/openblockchain/obc-peer/openchain/consensus"
@@ -36,7 +37,6 @@ type obcSieve struct {
 	stack consensus.Stack
 	pbft  *pbftCore
 
-	id            uint64
 	epoch         uint64
 	imminentEpoch uint64
 	blockNumber   uint64
@@ -48,15 +48,50 @@ type obcSieve struct {
 
 	queuedExec map[uint64]*Execute
 	queuedTx   [][]byte
+
+	isSufficientlyConnected chan bool
+	proceedWithConsensus    bool
 }
 
-func newObcSieve(id uint64, config *viper.Viper, stack consensus.Stack) *obcSieve {
-	op := &obcSieve{stack: stack, id: id}
+func newObcSieve(config *viper.Viper, stack consensus.Stack) *obcSieve {
+	op := &obcSieve{stack: stack}
 	op.queuedExec = make(map[uint64]*Execute)
-	op.pbft = newPbftCore(id, config, op, stack)
-	op.pbft.sts.RegisterListener(op)
+
+	op.isSufficientlyConnected = make(chan bool)
+	go op.waitForID(config)
 
 	return op
+}
+
+// this will give you the peer's PBFT ID
+func (op *obcSieve) waitForID(config *viper.Viper) {
+	var id uint64
+	var size int
+	var err error
+
+	for { // wait until you have a whitelist
+		size, _ = op.stack.CheckWhitelistExists()
+		if size > 0 { // there is a waitlist so you know your ID
+			handle, _ := op.stack.GetOwnHandle()
+			if err != nil {
+				logger.Error(err.Error())
+				panic(err.Error())
+			}
+			id, err = op.stack.GetValidatorID(handle)
+			if err != nil {
+				logger.Error(err.Error())
+				panic(err.Error())
+			}
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	// instantiate pbft-core
+	op.pbft = newPbftCore(id, config, op, op.stack)
+	op.pbft.sts.RegisterListener(op)
+
+	op.isSufficientlyConnected <- true
 }
 
 // moreCorrectThanByzantineQuorum returns the number of replicas that
@@ -84,7 +119,7 @@ func (op *obcSieve) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerID)
 		return fmt.Errorf("Unexpected message type: %s", ocMsg.Type)
 	}
 
-	senderID, err := getValidatorID(senderHandle)
+	senderID, err := op.stack.GetValidatorID(senderHandle)
 	if err != nil {
 		panic("Cannot map sender's PeerID to a valid replica ID")
 	}
@@ -140,7 +175,7 @@ func (op *obcSieve) unicast(msgPayload []byte, receiverID uint64) (err error) {
 		Type:    pb.OpenchainMessage_CONSENSUS,
 		Payload: msgPayload,
 	}
-	receiverHandle, err := getValidatorHandle(receiverID)
+	receiverHandle, err := op.stack.GetValidatorHandle(receiverID)
 	if err != nil {
 		return
 	}
@@ -152,7 +187,7 @@ func (op *obcSieve) sign(msg []byte) ([]byte, error) {
 }
 
 func (op *obcSieve) verify(senderID uint64, signature []byte, message []byte) error {
-	senderHandle, err := getValidatorHandle(senderID)
+	senderHandle, err := op.stack.GetValidatorHandle(senderID)
 	if err != nil {
 		return err
 	}
@@ -161,7 +196,7 @@ func (op *obcSieve) verify(senderID uint64, signature []byte, message []byte) er
 
 // called by pbft-core to signal when a view change happened
 func (op *obcSieve) viewChange(newView uint64) {
-	logger.Info("Replica %d observing pbft view change to %d", op.id, newView)
+	logger.Info("Replica %d observing pbft view change to %d", op.pbft.id, newView)
 	op.queuedTx = nil
 	op.imminentEpoch = newView
 
@@ -170,13 +205,18 @@ func (op *obcSieve) viewChange(newView uint64) {
 	}
 	op.pbft.stopTimer()
 
-	if op.pbft.primary(newView) == op.id {
+	if op.pbft.primary(newView) == op.pbft.id {
 		flush := &Flush{View: newView}
-		flush.ReplicaId = op.id
+		flush.ReplicaId = op.pbft.id
 		op.pbft.sign(flush)
 		req := &SievePbftMessage{Payload: &SievePbftMessage_Flush{flush}}
 		op.invokePbft(req)
 	}
+}
+
+// retrieve a validator's PeerID given its PBFT ID
+func (op *obcSieve) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+	return op.stack.GetValidatorHandle(id)
 }
 
 func (op *obcSieve) broadcastMsg(svMsg *SieveMessage) {
@@ -191,17 +231,17 @@ func (op *obcSieve) broadcastMsg(svMsg *SieveMessage) {
 func (op *obcSieve) invokePbft(msg *SievePbftMessage) {
 	raw, _ := proto.Marshal(msg)
 	op.pbft.unlock()
-	op.pbft.request(raw, op.id)
+	op.pbft.request(raw, op.pbft.id)
 	op.pbft.lock()
 }
 
 func (op *obcSieve) recvRequest(txRaw []byte) {
-	if op.pbft.primary(op.epoch) != op.id || !op.pbft.activeView {
-		logger.Debug("Sieve backup %d ignoring request", op.id)
+	if op.pbft.primary(op.epoch) != op.pbft.id || !op.pbft.activeView {
+		logger.Debug("Sieve backup %d ignoring request", op.pbft.id)
 		return
 	}
 
-	logger.Debug("Sieve primary %d received request", op.id)
+	logger.Debug("Sieve primary %d received request", op.pbft.id)
 	op.queuedTx = append(op.queuedTx, txRaw)
 
 	if op.currentReq == "" {
@@ -222,10 +262,10 @@ func (op *obcSieve) processRequest() {
 		View:        op.epoch,
 		BlockNumber: op.blockNumber + 1,
 		Request:     txRaw,
-		ReplicaId:   op.id,
+		ReplicaId:   op.pbft.id,
 	}
 	logger.Debug("Sieve primary %d broadcasting execute epoch=%d, blockNo=%d",
-		op.id, exec.View, exec.BlockNumber)
+		op.pbft.id, exec.View, exec.BlockNumber)
 	op.broadcastMsg(&SieveMessage{&SieveMessage_Execute{exec}})
 	op.recvExecute(exec)
 }
@@ -271,12 +311,12 @@ func (op *obcSieve) processExecute() {
 	}
 
 	logger.Debug("Sieve replica %d received exec from %d, epoch=%d, blockNo=%d",
-		op.id, exec.ReplicaId, exec.View, exec.BlockNumber)
+		op.pbft.id, exec.ReplicaId, exec.View, exec.BlockNumber)
 
 	blockchainSize, _ := op.stack.GetBlockchainSize()
 	blockchainSize--
 	if op.blockNumber != blockchainSize {
-		logger.Critical("Sieve replica %d block number and ledger blockchain size diverged: blockNo=%d, blockchainSize=%d", op.id, op.blockNumber, blockchainSize)
+		logger.Critical("Sieve replica %d block number and ledger blockchain size diverged: blockNo=%d, blockchainSize=%d", op.pbft.id, op.blockNumber, blockchainSize)
 		return
 	}
 
@@ -290,7 +330,7 @@ func (op *obcSieve) processExecute() {
 	op.stack.ExecTxs(op.currentReq, op.currentTx)
 	hash, err := op.previewCommit(op.blockNumber)
 	if err != nil {
-		err = fmt.Errorf("Sieve replica %d ignoring execute: %s", op.id, err)
+		err = fmt.Errorf("Sieve replica %d ignoring execute: %s", op.pbft.id, err)
 		logger.Error(err.Error())
 		op.blockNumber--
 		op.currentReq = ""
@@ -299,7 +339,7 @@ func (op *obcSieve) processExecute() {
 
 	op.currentResult = hash
 
-	logger.Debug("Sieve replica %d executed blockNo=%d, request=%s, result=%s", op.id, op.blockNumber, op.currentReq, op.currentResult)
+	logger.Debug("Sieve replica %d executed blockNo=%d, request=%s, result=%s", op.pbft.id, op.blockNumber, op.currentReq, op.currentResult)
 
 	// for simplicity's sake, we use the pbft timer
 	op.pbft.startTimer(op.pbft.requestTimeout)
@@ -309,23 +349,23 @@ func (op *obcSieve) processExecute() {
 		BlockNumber:   exec.BlockNumber,
 		RequestDigest: op.currentReq,
 		ResultDigest:  op.currentResult,
-		ReplicaId:     op.id,
+		ReplicaId:     op.pbft.id,
 	}
 	op.pbft.sign(verify)
 
 	logger.Debug("Sieve replica %d sending verify blockNo=%d",
-		op.id, verify.BlockNumber)
+		op.pbft.id, verify.BlockNumber)
 	op.broadcastMsg(&SieveMessage{&SieveMessage_Verify{verify}})
 	op.recvVerify(verify)
 }
 
 func (op *obcSieve) recvVerify(verify *Verify) {
-	if op.pbft.primary(op.epoch) != op.id || !op.pbft.activeView {
+	if op.pbft.primary(op.epoch) != op.pbft.id || !op.pbft.activeView {
 		return
 	}
 
 	logger.Debug("Sieve primary %d received verify from %d, blockNo=%d, result %s",
-		op.id, verify.ReplicaId, verify.BlockNumber, verify.ResultDigest)
+		op.pbft.id, verify.ReplicaId, verify.BlockNumber, verify.ResultDigest)
 
 	if err := op.pbft.verify(verify); err != nil {
 		logger.Warning("Invalid verify message: %s", err)
@@ -348,7 +388,7 @@ func (op *obcSieve) recvVerify(verify *Verify) {
 
 	for _, v := range op.verifyStore {
 		if v.ReplicaId == verify.ReplicaId {
-			logger.Info("Duplicate verify from %d", op.id)
+			logger.Info("Duplicate verify from %d", op.pbft.id)
 			return
 		}
 	}
@@ -362,7 +402,7 @@ func (op *obcSieve) recvVerify(verify *Verify) {
 			RequestDigest: op.currentReq,
 			Dset:          dSet,
 		}
-		verifySet.ReplicaId = op.id
+		verifySet.ReplicaId = op.pbft.id
 		op.pbft.sign(verifySet)
 		req := &SievePbftMessage{Payload: &SievePbftMessage_VerifySet{verifySet}}
 		op.invokePbft(req)
@@ -493,41 +533,41 @@ func (op *obcSieve) executeVerifySet(vset *VerifySet) {
 	sync := false
 
 	logger.Debug("Replica %d received verify-set from pbft, view %d, block %d",
-		op.id, vset.View, vset.BlockNumber)
+		op.pbft.id, vset.View, vset.BlockNumber)
 
 	if vset.View != op.epoch {
 		logger.Debug("Replica %d ignoring verify-set for wrong epoch: expected %d, got %d",
-			op.id, op.epoch, vset.View)
+			op.pbft.id, op.epoch, vset.View)
 		return
 	}
 
 	if vset.BlockNumber < op.blockNumber {
 		logger.Debug("Replica %d ignoring verify-set for old block: expected %d, got %d",
-			op.id, op.blockNumber, vset.BlockNumber)
+			op.pbft.id, op.blockNumber, vset.BlockNumber)
 		return
 	}
 
 	if vset.BlockNumber == op.blockNumber && op.currentReq == "" {
 		logger.Debug("Replica %d ignoring verify-set for already committed block",
-			op.id)
+			op.pbft.id)
 		return
 	}
 
 	if op.currentReq == "" {
 		logger.Debug("Replica %d received verify-set without pending execute",
-			op.id)
+			op.pbft.id)
 		sync = true
 	}
 
 	if vset.BlockNumber != op.blockNumber {
 		logger.Debug("Replica %d received verify-set for wrong block: expected %d, got %d",
-			op.id, op.blockNumber, vset.BlockNumber)
+			op.pbft.id, op.blockNumber, vset.BlockNumber)
 		sync = true
 	}
 
 	if vset.RequestDigest != op.currentReq {
 		logger.Debug("Replica %d received verify-set for different execute",
-			op.id)
+			op.pbft.id)
 		sync = true
 	}
 
@@ -562,23 +602,23 @@ func (op *obcSieve) executeVerifySet(vset *VerifySet) {
 		op.processRequest()
 	}
 
-	if op.pbft.primary(op.epoch) != op.id {
+	if op.pbft.primary(op.epoch) != op.pbft.id {
 		op.processExecute()
 	}
 }
 
 func (op *obcSieve) executeFlush(flush *Flush) {
-	logger.Debug("Replica %d received flush from pbft", op.id)
+	logger.Debug("Replica %d received flush from pbft", op.pbft.id)
 	if flush.View < op.epoch {
 		logger.Warning("Replica %d ignoring old flush for epoch %d, we are in epoch %d",
-			op.id, flush.View, op.epoch)
+			op.pbft.id, flush.View, op.epoch)
 		return
 	}
 	op.epoch = flush.View
-	logger.Info("Replica %d advancing epoch to %d", op.id, op.epoch)
+	logger.Info("Replica %d advancing epoch to %d", op.pbft.id, op.epoch)
 	op.queuedTx = nil
 	if op.currentReq != "" {
-		logger.Info("Replica %d rolling back speculative execution", op.id)
+		logger.Info("Replica %d rolling back speculative execution", op.pbft.id)
 		op.rollback()
 		op.blockNumber--
 		op.currentReq = ""
@@ -620,7 +660,7 @@ func (op *obcSieve) sync(blockNumber uint64, blockHash []byte, nodes []*Verify) 
 
 	var peers []*pb.PeerID
 	for _, n := range nodes {
-		peer, err := getValidatorHandle(n.ReplicaId)
+		peer, err := op.stack.GetValidatorHandle(n.ReplicaId)
 		if err == nil {
 			peers = append(peers, peer)
 		}

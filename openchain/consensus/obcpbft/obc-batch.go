@@ -46,60 +46,53 @@ type obcBatch struct {
 	proceedWithConsensus    bool
 }
 
-func newObcBatch(id uint64, config *viper.Viper, stack consensus.Stack) *obcBatch {
+func newObcBatch(config *viper.Viper, stack consensus.Stack) *obcBatch {
 	var err error
 	op := &obcBatch{stack: stack}
-	op.pbft = newPbftCore(id, config, op, stack)
 	op.batchSize = config.GetInt("general.batchSize")
 	op.batchStore = nil
 	op.batchTimeout, err = time.ParseDuration(config.GetString("general.timeout.batch"))
 	if err != nil {
 		panic(fmt.Errorf("Cannot parse batch timeout: %s", err))
 	}
-	// create non-running timer
-	op.batchTimer = time.NewTimer(100 * time.Hour) // XXX ugly
-	op.batchTimer.Stop()
-	go op.batchTimerHander()
 
 	op.isSufficientlyConnected = make(chan bool)
-	go op.checkConnections()
+	go op.waitForID(config)
 
 	return op
 }
 
-// once initialized, did we connect to all validators?
-func (op *obcBatch) checkConnections() {
-	var threshold int
-	newList := &pb.PeersMessage{}
-	vPeersMsg := &pb.PeersMessage{}
+// this will give you the peer's PBFT ID
+func (op *obcBatch) waitForID(config *viper.Viper) {
+	var id uint64
+	var size int
+	var err error
 
-	// is there an existing whitelist? if so, no need to wait until fully connected
-	list, err := op.stack.GetWhitelist()
-
-	// if there's no whitelist, it means the whole network is starting from scratch
-	if err != nil {
-		threshold = op.pbft.N - 1
-	} else {
-		threshold = 2 * op.pbft.f
-	}
-
-	for {
-		vPeersMsg, _ = op.stack.GetConnectedVPs()
-		// TODO if err == nil, need to filter them based on the whitelist
-		count := len(vPeersMsg.GetPeers())
-		if count >= threshold {
-			if err != nil { // if you're starting from scratch
-				newList = vPeersMsg
-			} else { // if you're restarting
-				newList = list
-			}
-			err = op.stack.SetWhitelist(newList) // set and save that whitelist
+	for { // wait until you have a whitelist
+		size, _ = op.stack.CheckWhitelistExists()
+		if size > 0 { // there is a waitlist so you know your ID
+			handle, _ := op.stack.GetOwnHandle()
 			if err != nil {
-				logger.Debug("Unable to set whitelist: %v", err)
+				logger.Error(err.Error())
+				panic(err.Error())
+			}
+			id, err = op.stack.GetValidatorID(handle)
+			if err != nil {
+				logger.Error(err.Error())
+				panic(err.Error())
 			}
 			break
 		}
+		time.Sleep(1 * time.Second)
 	}
+
+	// instantiate pbft-core
+	op.pbft = newPbftCore(id, config, op, op.stack)
+
+	// create non-running timer
+	op.batchTimer = time.NewTimer(100 * time.Hour) // XXX ugly
+	op.batchTimer.Stop()
+	go op.batchTimerHander()
 
 	op.isSufficientlyConnected <- true
 }
@@ -153,7 +146,7 @@ func (op *obcBatch) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerID)
 			}
 		}
 	} else if pbftMsg := batchMsg.GetPbftMessage(); pbftMsg != nil {
-		senderID, err := getValidatorID(senderHandle) // who sent this?
+		senderID, err := op.stack.GetValidatorID(senderHandle) // who sent this?
 		if err != nil {
 			panic("Cannot map sender's PeerID to a valid replica ID")
 		}
@@ -193,7 +186,7 @@ func (op *obcBatch) broadcast(msgPayload []byte) {
 
 // send a message to a specific replica
 func (op *obcBatch) unicast(msgPayload []byte, receiverID uint64) (err error) {
-	receiverHandle, err := getValidatorHandle(receiverID)
+	receiverHandle, err := op.stack.GetValidatorHandle(receiverID)
 	if err != nil {
 		return
 	}
@@ -206,7 +199,7 @@ func (op *obcBatch) sign(msg []byte) ([]byte, error) {
 
 // verify message signature
 func (op *obcBatch) verify(senderID uint64, signature []byte, message []byte) error {
-	senderHandle, err := getValidatorHandle(senderID)
+	senderHandle, err := op.stack.GetValidatorHandle(senderID)
 	if err != nil {
 		return err
 	}
@@ -269,6 +262,11 @@ func (op *obcBatch) viewChange(curView uint64) {
 	if op.batchTimerActive {
 		op.stopBatchTimer()
 	}
+}
+
+// retrieve a validator's PeerID given its PBFT ID
+func (op *obcBatch) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+	return op.stack.GetValidatorHandle(id)
 }
 
 // =============================================================================

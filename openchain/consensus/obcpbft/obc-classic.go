@@ -22,6 +22,7 @@ package obcpbft
 import (
 	"encoding/base64"
 	"fmt"
+	"time"
 
 	"github.com/openblockchain/obc-peer/openchain/consensus"
 	"github.com/openblockchain/obc-peer/openchain/util"
@@ -34,18 +35,58 @@ import (
 type obcClassic struct {
 	stack consensus.Stack
 	pbft  *pbftCore
+
+	isSufficientlyConnected chan bool
+	proceedWithConsensus    bool
 }
 
-func newObcClassic(id uint64, config *viper.Viper, stack consensus.Stack) *obcClassic {
+func newObcClassic(config *viper.Viper, stack consensus.Stack) *obcClassic {
 	op := &obcClassic{stack: stack}
-	op.pbft = newPbftCore(id, config, op, stack)
+
+	op.isSufficientlyConnected = make(chan bool)
+	go op.waitForID(config)
+
 	return op
+}
+
+// this will give you the peer's PBFT ID
+func (op *obcClassic) waitForID(config *viper.Viper) {
+	var id uint64
+	var size int
+	var err error
+
+	for { // wait until you have a whitelist
+		size, _ = op.stack.CheckWhitelistExists()
+		if size > 0 { // there is a waitlist so you know your ID
+			handle, _ := op.stack.GetOwnHandle()
+			if err != nil {
+				logger.Error(err.Error())
+				panic(err.Error())
+			}
+			id, err = op.stack.GetValidatorID(handle)
+			if err != nil {
+				logger.Error(err.Error())
+				panic(err.Error())
+			}
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	// instantiate pbft-core
+	op.pbft = newPbftCore(id, config, op, op.stack)
+
+	op.isSufficientlyConnected <- true
 }
 
 // RecvMsg receives both CHAIN_TRANSACTION and CONSENSUS messages from
 // the stack. New transaction requests are broadcast to all replicas,
 // so that the current primary will receive the request.
 func (op *obcClassic) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerID) error {
+	for !op.proceedWithConsensus {
+		op.proceedWithConsensus = <-op.isSufficientlyConnected
+	}
+
 	if ocMsg.Type == pb.OpenchainMessage_CHAIN_TRANSACTION {
 		logger.Info("New consensus request received")
 
@@ -62,7 +103,7 @@ func (op *obcClassic) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerI
 		return fmt.Errorf("Unexpected message type: %s", ocMsg.Type)
 	}
 
-	senderID, err := getValidatorID(senderHandle)
+	senderID, err := op.stack.GetValidatorID(senderHandle)
 	if err != nil {
 		panic("Cannot map sender's PeerID to a valid replica ID")
 	}
@@ -96,7 +137,7 @@ func (op *obcClassic) unicast(msgPayload []byte, receiverID uint64) (err error) 
 		Type:    pb.OpenchainMessage_CONSENSUS,
 		Payload: msgPayload,
 	}
-	receiverHandle, err := getValidatorHandle(receiverID)
+	receiverHandle, err := op.stack.GetValidatorHandle(receiverID)
 	if err != nil {
 		return
 	}
@@ -108,7 +149,7 @@ func (op *obcClassic) sign(msg []byte) ([]byte, error) {
 }
 
 func (op *obcClassic) verify(senderID uint64, signature []byte, message []byte) error {
-	senderHandle, err := getValidatorHandle(senderID)
+	senderHandle, err := op.stack.GetValidatorHandle(senderID)
 	if err != nil {
 		return err
 	}
@@ -168,4 +209,9 @@ func (op *obcClassic) execute(txRaw []byte) {
 // called when a view-change happened in the underlying PBFT
 // classic mode pbft does not use this information
 func (op *obcClassic) viewChange(curView uint64) {
+}
+
+// retrieve a validator's PeerID given its PBFT ID
+func (op *obcClassic) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+	return op.stack.GetValidatorHandle(id)
 }

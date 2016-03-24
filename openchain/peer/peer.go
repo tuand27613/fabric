@@ -96,6 +96,7 @@ type MessageHandlerCoordinator interface {
 	SecurityAccessor
 	BlockChainAccessor
 	StateAccessor
+	Gatekeeper
 	RegisterHandler(messageHandler MessageHandler) error
 	DeregisterHandler(messageHandler MessageHandler) error
 	Broadcast(*pb.OpenchainMessage, pb.PeerEndpoint_Type) []error
@@ -158,7 +159,8 @@ func GetLocalAddress() (peerAddress string, err error) {
 	return
 }
 
-// GetPeerEndpoint returns the PeerEndpoint for this Peer instance.  Affected by env:peer.addressAutoDetect
+// GetPeerEndpoint returns the PeerEndpoint for this Peer instance
+// Affected by env:peer.addressAutoDetect
 func GetPeerEndpoint() (*pb.PeerEndpoint, error) {
 	var peerAddress string
 	var peerType pb.PeerEndpoint_Type
@@ -216,6 +218,7 @@ type handlerMap struct {
 	m map[pb.PeerID]MessageHandler
 }
 
+// HandlerFactory generates message handlers for the Peer
 type HandlerFactory func(MessageHandlerCoordinator, ChatStream, bool, MessageHandler) (MessageHandler, error)
 
 // PeerImpl implementation of the Peer service
@@ -224,6 +227,7 @@ type PeerImpl struct {
 	handlerMap     *handlerMap
 	ledgerWrapper  *ledgerWrapper
 	secHelper      crypto.Peer
+	whitelist      *whitelist
 }
 
 // NewPeerWithHandler returns a Peer which uses the supplied handler factory function for creating new handlers on new Chat service invocations.
@@ -235,11 +239,19 @@ func NewPeerWithHandler(handlerFact HandlerFactory) (*PeerImpl, error) {
 	peer.handlerFactory = handlerFact
 	peer.handlerMap = &handlerMap{m: make(map[pb.PeerID]MessageHandler)}
 
+	// is this a peer that's restarting after a crash? if so, load the whitelist
+	err := peer.LoadWhitelist()
+	if err != nil {
+		peer.whitelist = &whitelist{cap: -1,
+			handlerMap: make(map[*pb.PeerID]*MessageHandler),
+			index:      []string{},
+			order:      []*pb.PeerID{}}
+	}
+
 	// Install security object for peer
 	if viper.GetBool("security.enabled") {
 		enrollID := viper.GetString("security.enrollID")
 		enrollSecret := viper.GetString("security.enrollSecret")
-		var err error
 		if viper.GetBool("peer.validator.enabled") {
 			peerLogger.Debug("Registering validator with enroll ID: %s", enrollID)
 			if err = crypto.RegisterValidator(enrollID, nil, enrollID, enrollSecret); nil != err {
@@ -313,11 +325,12 @@ func (p *PeerImpl) PeersDiscovered(peersMessage *pb.PeersMessage) error {
 		return fmt.Errorf("Error in processing PeersDiscovered: %s", err)
 	}
 	for _, peerEndpoint := range peersMessage.Peers {
-		// Filter out THIS Peer's endpoint
 		if *getHandlerKeyFromPeerEndpoint(thisPeersEndpoint) == *getHandlerKeyFromPeerEndpoint(peerEndpoint) {
-			// NOOP
+			// if this is THIS peer's endpoint do nothing
+		} else if _, ok := p.whitelist.handlerMap[getHandlerKeyFromPeerEndpoint(peerEndpoint)]; ok == false && (len(p.whitelist.handlerMap) > 0) { // prevent outgoing connections
+			// if we have a whitelist *and* this PeerEndpoint.ID is not in it, do NOT connect to it
 		} else if _, ok := p.handlerMap.m[*getHandlerKeyFromPeerEndpoint(peerEndpoint)]; ok == false {
-			// Start chat with Peer
+			// start chat with peer
 			go p.chatWithPeer(peerEndpoint.Address)
 		}
 	}
@@ -345,11 +358,21 @@ func (p *PeerImpl) RegisterHandler(messageHandler MessageHandler) error {
 	p.handlerMap.Lock()
 	defer p.handlerMap.Unlock()
 	if _, ok := p.handlerMap.m[*key]; ok == true {
-		// Duplicate, return error
+		// duplicate, return error
 		return newDuplicateHandlerError(messageHandler)
 	}
+	remotePeerEndpoint, _ := messageHandler.To()
+	if _, ok := p.whitelist.handlerMap[getHandlerKeyFromPeerEndpoint(&remotePeerEndpoint)]; ok == false && (len(p.whitelist.handlerMap) > 0) { // prevent incoming (& outgoing...) connections
+		// if we have a whitelist *and* this PeerEndpoint.ID is not in it, do NOT accept connections from it
+		return fmt.Errorf("Did not accept connection from non-whitelisted peeer: %v", remotePeerEndpoint.ID)
+	}
 	p.handlerMap.m[*key] = messageHandler
-	peerLogger.Debug("registered handler with key: %s", key)
+	peerLogger.Debug("Registered handler with key: %s", key)
+	err = p.SaveWhitelist()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

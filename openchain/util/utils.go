@@ -21,8 +21,10 @@ package util
 
 import (
 	"crypto/rand"
+	"encoding/gob"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	gp "google/protobuf"
@@ -60,4 +62,36 @@ func CreateUtcTimestamp() *gp.Timestamp {
 	secs := now.Unix()
 	nanos := int32(now.UnixNano() - (secs * 1000000000))
 	return &(gp.Timestamp{Seconds: secs, Nanos: nanos})
+}
+
+// SaveToDisk encodes an object via the gob package and saves it to disk
+func SaveToDisk(path string, object interface{}) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("Unable to create file %v: %v", path, err)
+	}
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	err = encoder.Encode(object)
+	if err != nil {
+		return fmt.Errorf("Unable to encode object before saving to file %v: %v", path, err)
+	}
+	return nil
+}
+
+// LoadFromDisk laods a file from disk and decodes it via the gob package
+func LoadFromDisk(path string, object interface{}) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("Unable to load file %v: %v", path, err)
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+	err = decoder.Decode(object)
+	if err != nil {
+		return fmt.Errorf("Unable to decode loaded file %v: %v", path, err)
+	}
+	return nil
 }
