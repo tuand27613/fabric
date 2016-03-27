@@ -20,12 +20,10 @@ under the License.
 package obcpbft
 
 import (
-	"encoding/base64"
 	"fmt"
 	"time"
 
 	"github.com/openblockchain/obc-peer/openchain/consensus"
-	"github.com/openblockchain/obc-peer/openchain/util"
 	pb "github.com/openblockchain/obc-peer/protos"
 
 	"github.com/golang/protobuf/proto"
@@ -33,22 +31,33 @@ import (
 )
 
 type obcBatch struct {
-	stack consensus.Stack
-	pbft  *pbftCore
+	stack                   consensus.Stack
+	pbft                    *pbftCore
+	startup                 chan []byte
+	executor                Executor
+	isSufficientlyConnected chan bool
+	proceedWithConsensus    bool
 
 	batchSize        int
 	batchStore       [][]byte
 	batchTimer       *time.Timer
 	batchTimerActive bool
 	batchTimeout     time.Duration
-
-	isSufficientlyConnected chan bool
-	proceedWithConsensus    bool
 }
 
 func newObcBatch(config *viper.Viper, stack consensus.Stack) *obcBatch {
 	var err error
+
 	op := &obcBatch{stack: stack}
+	op.startup = make(chan []byte)
+	op.isSufficientlyConnected = make(chan bool)
+
+	op.executor = NewOBCExecutor(config, op, stack)
+
+	logger.Debug("Replica obtaining startup information")
+	startupInfo := <-op.startup
+	close(op.startup)
+
 	op.batchSize = config.GetInt("general.batchSize")
 	op.batchStore = nil
 	op.batchTimeout, err = time.ParseDuration(config.GetString("general.timeout.batch"))
@@ -56,14 +65,17 @@ func newObcBatch(config *viper.Viper, stack consensus.Stack) *obcBatch {
 		panic(fmt.Errorf("Cannot parse batch timeout: %s", err))
 	}
 
-	op.isSufficientlyConnected = make(chan bool)
-	go op.waitForID(config)
+	go op.waitForID(config, startupInfo)
 
 	return op
 }
 
+func (op *obcBatch) Startup(seqNo uint64, id []byte) {
+	op.startup <- id
+}
+
 // this will give you the peer's PBFT ID
-func (op *obcBatch) waitForID(config *viper.Viper) {
+func (op *obcBatch) waitForID(config *viper.Viper, startupInfo []byte) {
 	var id uint64
 	var size int
 	var err error
@@ -71,12 +83,7 @@ func (op *obcBatch) waitForID(config *viper.Viper) {
 	for { // wait until you have a whitelist
 		size, _ = op.stack.CheckWhitelistExists()
 		if size > 0 { // there is a waitlist so you know your ID
-			handle, _ := op.stack.GetOwnHandle()
-			if err != nil {
-				logger.Error(err.Error())
-				panic(err.Error())
-			}
-			id, err = op.stack.GetValidatorID(handle)
+			id, err = op.stack.GetOwnID()
 			if err != nil {
 				logger.Error(err.Error())
 				panic(err.Error())
@@ -87,7 +94,7 @@ func (op *obcBatch) waitForID(config *viper.Viper) {
 	}
 
 	// instantiate pbft-core
-	op.pbft = newPbftCore(id, config, op, op.stack)
+	op.pbft = newPbftCore(id, config, op, startupInfo)
 
 	// create non-running timer
 	op.batchTimer = time.NewTimer(100 * time.Hour) // XXX ugly
@@ -167,14 +174,6 @@ func (op *obcBatch) Close() {
 	op.batchTimer.Reset(0)
 }
 
-// Drain will block until all remaining execution has been handled
-func (op *obcBatch) Drain() {
-	op.pbft.lock()
-	op.sendBatch()
-	op.pbft.unlock()
-	op.pbft.drain()
-}
-
 // =============================================================================
 // innerStack interface (functions called by pbft-core)
 // =============================================================================
@@ -213,48 +212,14 @@ func (op *obcBatch) validate(txRaw []byte) error {
 }
 
 // execute an opaque request which corresponds to an OBC Transaction
-func (op *obcBatch) execute(tbRaw []byte) {
+func (op *obcBatch) execute(seqNo uint64, tbRaw []byte, execInfo *ExecutionInfo) {
+
 	tb := &pb.TransactionBlock{}
-	err := proto.Unmarshal(tbRaw, tb)
-	if err != nil {
+	if err := proto.Unmarshal(tbRaw, tb); err != nil {
 		return
 	}
 
-	txs := tb.Transactions
-	txBatchID := base64.StdEncoding.EncodeToString(util.ComputeCryptoHash(tbRaw))
-
-	for i, tx := range txs {
-		txRaw, _ := proto.Marshal(tx)
-		if err = op.validate(txRaw); err != nil {
-			err = fmt.Errorf("Request in transaction %d from batch %s did not verify: %s", i, txBatchID, err)
-			logger.Error(err.Error())
-			return
-		}
-	}
-
-	if err := op.stack.BeginTxBatch(txBatchID); err != nil {
-		err = fmt.Errorf("Failed to begin transaction batch %s: %v", txBatchID, err)
-		logger.Error(err.Error())
-		return
-	}
-
-	if _, err := op.stack.ExecTxs(txBatchID, txs); nil != err {
-		err = fmt.Errorf("Fail to execute transaction batch %s: %v", txBatchID, err)
-		logger.Error(err.Error())
-		if err = op.stack.RollbackTxBatch(txBatchID); err != nil {
-			panic(fmt.Errorf("Unable to rollback transaction batch %s: %v", txBatchID, err))
-		}
-		return
-	}
-
-	if _, err = op.stack.CommitTxBatch(txBatchID, nil); err != nil {
-		err = fmt.Errorf("Failed to commit transaction batch %s to the ledger: %v", txBatchID, err)
-		logger.Error(err.Error())
-		if err = op.stack.RollbackTxBatch(txBatchID); err != nil {
-			panic(fmt.Errorf("Unable to rollback transaction batch %s: %v", txBatchID, err))
-		}
-		return
-	}
+	op.executor.Execute(seqNo, tb.Transactions, execInfo)
 }
 
 // signal when a view-change happened
@@ -373,4 +338,37 @@ func (op *obcBatch) wrapMessage(msgPayload []byte) *pb.OpenchainMessage {
 		Payload: packedBatchMsg,
 	}
 	return ocMsg
+}
+
+func (op *obcBatch) Checkpoint(seqNo uint64, id []byte) {
+	op.pbft.Checkpoint(seqNo, id)
+}
+
+func (op *obcBatch) skipTo(seqNo uint64, id []byte, replicas []uint64, execInfo *ExecutionInfo) {
+	handles, err := op.stack.GetValidatorHandles(replicas)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	op.executor.SkipTo(seqNo, id, handles, execInfo)
+}
+
+func (op *obcBatch) validState(seqNo uint64, id []byte, replicas []uint64, execInfo *ExecutionInfo) {
+	handles, err := op.stack.GetValidatorHandles(replicas)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	op.executor.ValidState(seqNo, id, handles, execInfo)
+}
+
+// not needed
+func (op *obcBatch) Validate(seqNo uint64, id []byte) (commit bool, correctedID []byte, peerIDs []*pb.PeerID) {
+	return
+}
+
+func (op *obcBatch) idleChan() <-chan struct{} {
+	return op.executor.IdleChan()
+}
+
+func (op *obcBatch) getPBFTCore() *pbftCore {
+	return op.pbft
 }

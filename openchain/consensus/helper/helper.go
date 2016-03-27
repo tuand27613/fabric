@@ -49,6 +49,15 @@ func NewHelper(mhc peer.MessageHandlerCoordinator) consensus.Stack {
 		secHelper: mhc.GetSecHelper()}
 }
 
+// GetOwnID retrieve this peer's PBFT ID
+func (h *Helper) GetOwnID() (id uint64, err error) {
+	handle, err := h.GetOwnHandle()
+	if err != nil {
+		return
+	}
+	return h.GetValidatorID(handle)
+}
+
 // GetOwnHandle retrieve this peer's PeerID
 func (h *Helper) GetOwnHandle() (handle *pb.PeerID, err error) {
 	ep, err := h.coordinator.GetPeerEndpoint()
@@ -74,12 +83,38 @@ func (h *Helper) GetValidatorID(handle *pb.PeerID) (id uint64, err error) {
 // GetValidatorHandle retrieves a validating peer's PeerID
 func (h *Helper) GetValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
 	_, order, _ := h.coordinator.GetWhitelistKeys()
-	if int(id) <= (len(order) - 1) {
+	if int(id) < len(order) {
 		return order[int(id)], nil
 	}
 	err = fmt.Errorf(`Couldn't retrieve validator's handle.
 					  Requested validator index was %v,
 					  length of whitelist keys slice is %v`, id, len(order))
+	return
+}
+
+// GetValidatorHandles returns the PeerIDs corresponding to a list of PBFT IDs
+func (h *Helper) GetValidatorHandles(ids []uint64) (handles []*pb.PeerID, err error) {
+	handles = make([]*pb.PeerID, len(ids))
+	for i, id := range ids {
+		handles[i], err = h.GetValidatorHandle(id)
+		if err != nil {
+			break
+		}
+	}
+	return
+}
+
+// GetConnectedValidators retrieves the list of connected validators
+func (h *Helper) GetConnectedValidators() (handles []*pb.PeerID, err error) {
+	peersMsg, err := h.coordinator.GetPeers()
+	if err == nil {
+		peers := peersMsg.GetPeers()
+		for _, endpoint := range peers {
+			if endpoint.Type == pb.PeerEndpoint_VALIDATOR {
+				handles = append(handles, endpoint.ID)
+			}
+		}
+	}
 	return
 }
 

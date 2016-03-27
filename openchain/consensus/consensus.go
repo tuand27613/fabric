@@ -30,11 +30,20 @@ type Consenter interface {
 	RecvMsg(msg *pb.OpenchainMessage, senderHandle *pb.PeerID) error
 }
 
+// Communicator is used to send messages to other validators
+type Communicator interface {
+	Broadcast(msg *pb.OpenchainMessage, peerType pb.PeerEndpoint_Type) error
+	Unicast(msg *pb.OpenchainMessage, receiverHandle *pb.PeerID) error
+}
+
 // Inquirer is used to retrieve info about the validating network
 type Inquirer interface {
+	GetOwnID() (id uint64, err error)
 	GetOwnHandle() (handle *pb.PeerID, err error)
 	GetValidatorID(handle *pb.PeerID) (id uint64, err error)
 	GetValidatorHandle(id uint64) (handle *pb.PeerID, err error)
+	GetValidatorHandles(ids []uint64) (handles []*pb.PeerID, err error)
+	GetConnectedValidators() (handles []*pb.PeerID, err error)
 }
 
 // Gatekeeper is used to manage the validating peer's whitelist
@@ -43,10 +52,11 @@ type Gatekeeper interface {
 	SetWhitelistCap(n int) error
 }
 
-// Communicator is used to send messages to other validators
-type Communicator interface {
-	Broadcast(msg *pb.OpenchainMessage, peerType pb.PeerEndpoint_Type) error
-	Unicast(msg *pb.OpenchainMessage, receiverHandle *pb.PeerID) error
+// NetworkStack is used to retrieve network infom send messagesm and manage the VP's whitelist
+type NetworkStack interface {
+	Communicator
+	Inquirer
+	Gatekeeper
 }
 
 // SecurityUtils is used to access the sign/verify methods from the crypto package
@@ -109,9 +119,7 @@ type LedgerStack interface {
 
 // Stack is the set of stack-facing methods available to the consensus plugin
 type Stack interface {
-	Inquirer
-	Gatekeeper
-	Communicator
+	NetworkStack
 	SecurityUtils
 	LedgerStack
 }
