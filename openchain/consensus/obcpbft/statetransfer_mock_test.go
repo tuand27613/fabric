@@ -99,7 +99,8 @@ func (hd *HashLedgerDirectory) GetConnectedValidators() (handles []*protos.PeerI
 	handles = make([]*protos.PeerID, len(hd.remoteLedgers))
 	i := 0
 	for k := range hd.remoteLedgers {
-		handles[i] = &k
+		temp := k
+		handles[i] = &temp
 		i++
 	}
 	return
