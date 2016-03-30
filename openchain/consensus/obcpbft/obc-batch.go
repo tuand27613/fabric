@@ -102,6 +102,7 @@ func (op *obcBatch) waitForID(config *viper.Viper, startupInfo []byte) {
 	go op.batchTimerHander()
 
 	op.isSufficientlyConnected <- true
+	logger.Debug("waitForID goroutine is done executing")
 }
 
 // RecvMsg receives both CHAIN_TRANSACTION and CONSENSUS messages from

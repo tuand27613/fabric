@@ -24,6 +24,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"time"
 
@@ -64,34 +65,52 @@ func CreateUtcTimestamp() *gp.Timestamp {
 	return &(gp.Timestamp{Seconds: secs, Nanos: nanos})
 }
 
-// SaveToDisk encodes an object via the gob package and saves it to disk
-func SaveToDisk(path string, object interface{}) error {
-	file, err := os.Create(path)
+// LoadFromDisk loads a file from disk
+func LoadFromDisk(filename string) (data []byte, err error) {
+	data, err = ioutil.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("Unable to create file %v: %v", path, err)
+		return nil, fmt.Errorf("Unable to load file %v: %v", filename, err)
+	}
+	return
+}
+
+// SaveToDisk saves a byte slice to disk
+func SaveToDisk(filename string, data []byte) error {
+	err := ioutil.WriteFile(filename, data, 0644)
+	if err != nil {
+		return fmt.Errorf("Unable to write to file %v: %v", filename, err)
+	}
+	return nil
+}
+
+// EncodeSaveToDisk encodes an object via the gob package and saves it to disk
+func EncodeSaveToDisk(filename string, object interface{}) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("Unable to create file %v: %v", filename, err)
 	}
 	defer file.Close()
 
 	encoder := gob.NewEncoder(file)
 	err = encoder.Encode(object)
 	if err != nil {
-		return fmt.Errorf("Unable to encode object before saving to file %v: %v", path, err)
+		return fmt.Errorf("Unable to encode object before saving to file %v: %v", filename, err)
 	}
 	return nil
 }
 
-// LoadFromDisk laods a file from disk and decodes it via the gob package
-func LoadFromDisk(path string, object interface{}) error {
-	file, err := os.Open(path)
+// LoadDecodeFromDisk loads a file from disk and decodes it via the gob package
+func LoadDecodeFromDisk(filename string, object interface{}) error {
+	file, err := os.Open(filename)
 	if err != nil {
-		return fmt.Errorf("Unable to load file %v: %v", path, err)
+		return fmt.Errorf("Unable to load file %v: %v", filename, err)
 	}
 	defer file.Close()
 
 	decoder := gob.NewDecoder(file)
 	err = decoder.Decode(object)
 	if err != nil {
-		return fmt.Errorf("Unable to decode loaded file %v: %v", path, err)
+		return fmt.Errorf("Unable to decode loaded file %v: %v", filename, err)
 	}
 	return nil
 }

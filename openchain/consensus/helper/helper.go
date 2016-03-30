@@ -69,26 +69,25 @@ func (h *Helper) GetOwnHandle() (handle *pb.PeerID, err error) {
 
 // GetValidatorID retrieves a validating peer's PBFT ID
 func (h *Helper) GetValidatorID(handle *pb.PeerID) (id uint64, err error) {
-	_, order, _ := h.coordinator.GetWhitelistKeys()
-	for k, v := range order {
-		if *v == *handle {
-			id = uint64(k)
-			break
-		}
+	whitelistedMap, _, _ := h.coordinator.GetWhitelist()
+	if value, ok := whitelistedMap[*handle]; !ok {
+		err = fmt.Errorf("Validator's handle (%v) not found in the whitelist: %+v", *handle, whitelistedMap)
+	} else {
+		id = uint64(value)
 	}
-	err = fmt.Errorf("Validator's handle not found in the whitelist")
+
 	return
 }
 
 // GetValidatorHandle retrieves a validating peer's PeerID
 func (h *Helper) GetValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
-	_, order, _ := h.coordinator.GetWhitelistKeys()
-	if int(id) < len(order) {
-		return order[int(id)], nil
+	_, sortedValues, _ := h.coordinator.GetWhitelist()
+	if int(id) < len(sortedValues) {
+		return sortedValues[int(id)], nil
 	}
 	err = fmt.Errorf(`Couldn't retrieve validator's handle.
 					  Requested validator index was %v,
-					  length of whitelist keys slice is %v`, id, len(order))
+					  length of whitelist keys slice is %v`, id, len(sortedValues))
 	return
 }
 
