@@ -243,6 +243,7 @@ func NewPeerWithHandler(handlerFact HandlerFactory) (*PeerImpl, error) {
 
 	// is this a peer that's restarting after a crash? if so, load the whitelist
 	peer.whitelist = &pb.Whitelist{Cap: -1,
+		Persisted:    false,
 		Security:     viper.GetBool("security.enabled"),
 		SortedKeys:   []string{},
 		SortedValues: []*pb.PeerID{}}
@@ -612,6 +613,7 @@ func sendTransactionsToThisPeer(peerAddress string, transaction *pb.Transaction)
 }
 
 func (p *PeerImpl) chatWithPeer(peerAddress string) error {
+	var err2 error
 	if len(peerAddress) == 0 {
 		peerLogger.Debug("Starting up the first peer")
 		return nil // nothing to do
@@ -634,9 +636,11 @@ func (p *PeerImpl) chatWithPeer(peerAddress string) error {
 			continue
 		}
 		peerLogger.Debug("Established Chat with peer address: %s", peerAddress)
-		p.handleChat(ctx, stream, true)
+		err2 = p.handleChat(ctx, stream, true)
 		stream.CloseSend()
+		break
 	}
+	return err2
 }
 
 // Chat implementation of the the Chat bidi streaming RPC function
