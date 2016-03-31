@@ -65,6 +65,10 @@ type innerStack interface {
 type pbftCore struct {
 	// internal data
 	internalLock sync.Mutex
+
+	perfStartTime time.Time // TTD perf run
+	perfReqNum    int       // TTD perf run
+
 	executing    bool // signals that application is executing
 	closed       chan bool
 	consumer     innerStack
@@ -167,6 +171,9 @@ func newPbftCore(id uint64, config *viper.Viper, consumer innerStack, startupID 
 	if instance.f*3+1 > instance.N {
 		panic(fmt.Sprintf("need at least %d enough replicas to tolerate %d byzantine faults, but only %d replicas configured", instance.f*3+1, instance.f, instance.N))
 	}
+
+	// TTD perf run
+	instance.perfReqNum = 0
 
 	instance.K = uint64(config.GetInt("general.K"))
 	instance.logMultiplier = uint64(config.GetInt("general.logmultiplier"))
@@ -409,6 +416,12 @@ func (instance *pbftCore) request(msgPayload []byte, senderID uint64) error {
 		ReplicaId: senderID}}}
 	instance.lock()
 	defer instance.unlock()
+	// TTD perf runs
+	if instance.perfReqNum == 0 {
+		instance.perfStartTime = time.Now()
+		logger.Info("starting perf run time %v", instance.perfStartTime)
+	}
+	// TTD
 	instance.recvMsgSync(msg, senderID)
 
 	return nil
@@ -814,6 +827,14 @@ func (instance *pbftCore) executeOne(idx msgID) bool {
 		instance.lock()
 	}
 
+	// TTD perf run
+	instance.perfReqNum = instance.perfReqNum + 1
+	if instance.perfReqNum >= 1000 {
+		elapsedTime := int64(time.Since(instance.perfStartTime).Seconds())
+		tps := int64(instance.perfReqNum) / elapsedTime
+		logger.Info("Total requests %v in %v  transactions/sec %v", instance.perfReqNum, elapsedTime, tps)
+	}
+	// TTD
 	if len(instance.outstandingReqs) > 0 {
 		instance.startTimer(instance.requestTimeout)
 	}

@@ -140,24 +140,30 @@ func (obcex *obcExecutor) ValidState(seqNo uint64, id []byte, peerIDs []*pb.Peer
 
 // Enqueues a request for execution if there is room
 func (obcex *obcExecutor) Execute(seqNo uint64, txs []*pb.Transaction, execInfo *ExecutionInfo) {
-	request := &transaction{
-		seqNo:    seqNo,
-		txs:      txs,
-		execInfo: execInfo,
-	}
-	select {
-	case obcex.executionQueue <- request:
-		logger.Debug("%v queued request for sequence number %d", obcex.id, seqNo)
-	default:
-		logger.Error("%v error queueing request (queue full) for sequence number %d", obcex.id, seqNo)
-		obcex.drainExecutionQueue()
-		obcex.executionQueue <- &transaction{
-			seqNo: seqNo,
-			// nil txRaw indicates a missed request
-		}
-		obcex.executionQueue <- request // queue request
-	}
 
+	if execInfo.Checkpoint {
+		logger.Debug("%v sending checkpoint as part of perf run: %x", obcex.id)
+		obcex.orderer.Checkpoint(seqNo, []byte(fmt.Sprint(seqNo)))
+	}
+	/*
+		request := &transaction{
+			seqNo:    seqNo,
+			txs:      txs,
+			execInfo: execInfo,
+		}
+		select {
+		case obcex.executionQueue <- request:
+			logger.Debug("%v queued request for sequence number %d", obcex.id, seqNo)
+		default:
+			logger.Error("%v error queueing request (queue full) for sequence number %d", obcex.id, seqNo)
+			obcex.drainExecutionQueue()
+			obcex.executionQueue <- &transaction{
+				seqNo: seqNo,
+				// nil txRaw indicates a missed request
+			}
+			obcex.executionQueue <- request // queue request
+		}
+	*/
 }
 
 // Skips to a point further in the execution
