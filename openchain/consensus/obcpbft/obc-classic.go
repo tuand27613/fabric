@@ -50,7 +50,6 @@ func newObcClassic(config *viper.Viper, stack consensus.Stack) *obcClassic {
 	close(op.startup)
 
 	go op.waitForID(config, startupInfo)
-
 	return op
 }
 
@@ -74,6 +73,11 @@ func (op *obcClassic) waitForID(config *viper.Viper, startupInfo []byte) {
 
 	// instantiate pbft-core
 	op.pbft = newPbftCore(id, config, op, startupInfo)
+
+	queueSize := config.GetInt("executor.queuesize")
+	if queueSize <= int(op.pbft.L) {
+		logger.Error("Replica %d has executor queue size %d less than PBFT log size %d, this indicates a misconfiguration", id, queueSize, op.pbft.L)
+	}
 
 	op.isSufficientlyConnected <- true
 }

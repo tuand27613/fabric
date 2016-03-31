@@ -91,6 +91,11 @@ func (op *obcBatch) waitForID(config *viper.Viper, startupInfo []byte) {
 	// instantiate pbft-core
 	op.pbft = newPbftCore(id, config, op, startupInfo)
 
+	queueSize := config.GetInt("executor.queuesize")
+	if queueSize <= int(op.pbft.L) {
+		logger.Error("Replica %d has executor queue size %d less than PBFT log size %d, this indicates a misconfiguration", id, queueSize, op.pbft.L)
+	}
+
 	// create non-running timer
 	op.batchTimer = time.NewTimer(100 * time.Hour) // XXX ugly
 	op.batchTimer.Stop()
