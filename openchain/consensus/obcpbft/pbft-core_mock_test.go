@@ -40,7 +40,7 @@ func (pe *pbftEndpoint) idleChan() <-chan struct{} {
 }
 
 func (pe *pbftEndpoint) deliver(msg []byte, senderHandle *pb.PeerID) {
-	senderID, _ := pe.GetValidatorID(senderHandle)
+	senderID := pe.GetValidatorID(senderHandle)
 	pe.pbft.receive(msg, senderID)
 }
 
@@ -62,10 +62,7 @@ func (sc *simpleConsumer) broadcast(msgPayload []byte) {
 	sc.pe.Broadcast(&pb.OpenchainMessage{Payload: msgPayload}, pb.PeerEndpoint_VALIDATOR)
 }
 func (sc *simpleConsumer) unicast(msgPayload []byte, receiverID uint64) error {
-	handle, err := sc.getValidatorHandle(receiverID)
-	if nil != err {
-		return err
-	}
+	handle := sc.getValidatorHandle(receiverID)
 	sc.pe.Unicast(&pb.OpenchainMessage{Payload: msgPayload}, handle)
 	return nil
 }
@@ -104,7 +101,7 @@ func (sc *simpleConsumer) viewChange(curView uint64) {
 	// no-op
 }
 
-func (sc *simpleConsumer) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+func (sc *simpleConsumer) getValidatorHandle(id uint64) (handle *pb.PeerID) {
 	return sc.pe.GetValidatorHandle(id)
 }
 

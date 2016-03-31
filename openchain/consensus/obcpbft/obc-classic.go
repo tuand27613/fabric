@@ -62,16 +62,11 @@ func (op *obcClassic) Startup(seqNo uint64, id []byte) {
 func (op *obcClassic) waitForID(config *viper.Viper, startupInfo []byte) {
 	var id uint64
 	var size int
-	var err error
 
 	for { // wait until you have a whitelist
-		size, _ = op.stack.CheckWhitelistExists()
+		size = op.stack.CheckWhitelistExists()
 		if size > 0 { // there is a waitlist so you know your ID
-			id, err = op.stack.GetOwnID()
-			if err != nil {
-				logger.Error(err.Error())
-				panic(err.Error())
-			}
+			id = op.stack.GetOwnID()
 			break
 		}
 		time.Sleep(1 * time.Second)
@@ -107,10 +102,7 @@ func (op *obcClassic) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerI
 		return fmt.Errorf("Unexpected message type: %s", ocMsg.Type)
 	}
 
-	senderID, err := op.stack.GetValidatorID(senderHandle)
-	if err != nil {
-		panic("Cannot map sender's PeerID to a valid replica ID")
-	}
+	senderID := op.stack.GetValidatorID(senderHandle)
 
 	op.pbft.receive(ocMsg.Payload, senderID)
 
@@ -141,10 +133,7 @@ func (op *obcClassic) unicast(msgPayload []byte, receiverID uint64) (err error) 
 		Type:    pb.OpenchainMessage_CONSENSUS,
 		Payload: msgPayload,
 	}
-	receiverHandle, err := op.stack.GetValidatorHandle(receiverID)
-	if err != nil {
-		return
-	}
+	receiverHandle := op.stack.GetValidatorHandle(receiverID)
 	return op.stack.Unicast(ocMsg, receiverHandle)
 }
 
@@ -153,10 +142,7 @@ func (op *obcClassic) sign(msg []byte) ([]byte, error) {
 }
 
 func (op *obcClassic) verify(senderID uint64, signature []byte, message []byte) error {
-	senderHandle, err := op.stack.GetValidatorHandle(senderID)
-	if err != nil {
-		return err
-	}
+	senderHandle := op.stack.GetValidatorHandle(senderID)
 	return op.stack.Verify(senderHandle, signature, message)
 }
 
@@ -191,7 +177,7 @@ func (op *obcClassic) viewChange(curView uint64) {
 }
 
 // retrieve a validator's PeerID given its PBFT ID
-func (op *obcClassic) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+func (op *obcClassic) getValidatorHandle(id uint64) (handle *pb.PeerID) {
 	return op.stack.GetValidatorHandle(id)
 }
 
@@ -200,18 +186,12 @@ func (op *obcClassic) Checkpoint(seqNo uint64, id []byte) {
 }
 
 func (op *obcClassic) skipTo(seqNo uint64, id []byte, replicas []uint64, execInfo *ExecutionInfo) {
-	handles, err := op.stack.GetValidatorHandles(replicas)
-	if err != nil {
-		logger.Error(err.Error())
-	}
+	handles := op.stack.GetValidatorHandles(replicas)
 	op.executor.SkipTo(seqNo, id, handles, execInfo)
 }
 
 func (op *obcClassic) validState(seqNo uint64, id []byte, replicas []uint64, execInfo *ExecutionInfo) {
-	handles, err := op.stack.GetValidatorHandles(replicas)
-	if err != nil {
-		logger.Error(err.Error())
-	}
+	handles := op.stack.GetValidatorHandles(replicas)
 	op.executor.ValidState(seqNo, id, handles, execInfo)
 }
 

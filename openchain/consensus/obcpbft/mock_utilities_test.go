@@ -66,14 +66,14 @@ func generateBroadcaster(validatorCount int) (requestBroadcaster int) {
 
 type omniProto struct {
 	// Stack methods
-	GetOwnIDImpl               func() (id uint64, err error)
-	GetOwnHandleImpl           func() (handle *pb.PeerID, err error)
-	GetValidatorIDImpl         func(handle *pb.PeerID) (id uint64, err error)
-	GetValidatorHandleImpl     func(id uint64) (handle *pb.PeerID, err error)
-	GetValidatorHandlesImpl    func(ids []uint64) (handles []*pb.PeerID, err error)
-	GetConnectedValidatorsImpl func() (handles []*pb.PeerID, err error)
-	CheckWhitelistExistsImpl   func() (size int, err error)
-	SetWhitelistCapImpl        func(cap int) error
+	GetOwnIDImpl               func() (id uint64)
+	GetOwnHandleImpl           func() (handle *pb.PeerID)
+	GetValidatorIDImpl         func(handle *pb.PeerID) (id uint64)
+	GetValidatorHandleImpl     func(id uint64) (handle *pb.PeerID)
+	GetValidatorHandlesImpl    func(ids []uint64) (handles []*pb.PeerID)
+	GetConnectedValidatorsImpl func() (handles []*pb.PeerID)
+	CheckWhitelistExistsImpl   func() (size int)
+	SetWhitelistCapImpl        func(cap int)
 	BroadcastImpl              func(msg *pb.OpenchainMessage, peerType pb.PeerEndpoint_Type) error
 	UnicastImpl                func(msg *pb.OpenchainMessage, receiverHandle *pb.PeerID) error
 	SignImpl                   func(msg []byte) ([]byte, error)
@@ -107,7 +107,7 @@ type omniProto struct {
 	viewChangeImpl         func(curView uint64)
 	signImpl               func(msg []byte) ([]byte, error)
 	verifyImpl             func(senderID uint64, signature []byte, message []byte) error
-	getValidatorHandleImpl func(id uint64) (handle *pb.PeerID, err error)
+	getValidatorHandleImpl func(id uint64) (handle *pb.PeerID)
 
 	// Closable Consenter methods
 	RecvMsgImpl  func(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerID) error
@@ -121,58 +121,58 @@ type omniProto struct {
 	ValidateImpl   func(seqNo uint64, id []byte) (commit bool, correctedID []byte, peerIDs []*pb.PeerID)
 }
 
-func (op *omniProto) GetOwnID() (id uint64, err error) {
+func (op *omniProto) GetOwnID() (id uint64) {
 	if nil != op.GetOwnIDImpl {
 		return op.GetOwnIDImpl()
 	}
 
 	panic("Unimplemented")
 }
-func (op *omniProto) GetOwnHandle() (handle *pb.PeerID, err error) {
+func (op *omniProto) GetOwnHandle() (handle *pb.PeerID) {
 	if nil != op.GetOwnHandleImpl {
 		return op.GetOwnHandleImpl()
 	}
 
 	panic("Unimplemented")
 }
-func (op *omniProto) GetValidatorID(handle *pb.PeerID) (id uint64, err error) {
+func (op *omniProto) GetValidatorID(handle *pb.PeerID) (id uint64) {
 	if nil != op.GetValidatorIDImpl {
 		return op.GetValidatorIDImpl(handle)
 	}
 
 	panic("Unimplemented")
 }
-func (op *omniProto) GetValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+func (op *omniProto) GetValidatorHandle(id uint64) (handle *pb.PeerID) {
 	if nil != op.GetValidatorHandleImpl {
 		return op.GetValidatorHandleImpl(id)
 	}
 
 	panic("Unimplemented")
 }
-func (op *omniProto) GetValidatorHandles(ids []uint64) (handles []*pb.PeerID, err error) {
+func (op *omniProto) GetValidatorHandles(ids []uint64) (handles []*pb.PeerID) {
 	if nil != op.GetValidatorHandlesImpl {
 		return op.GetValidatorHandlesImpl(ids)
 	}
 
 	panic("Unimplemented")
 }
-func (op *omniProto) GetConnectedValidators() (handles []*pb.PeerID, err error) {
+func (op *omniProto) GetConnectedValidators() (handles []*pb.PeerID) {
 	if nil != op.GetConnectedValidatorsImpl {
 		return op.GetConnectedValidatorsImpl()
 	}
 
 	panic("Unimplemented")
 }
-func (op *omniProto) CheckWhitelistExists() (size int, err error) {
+func (op *omniProto) CheckWhitelistExists() (size int) {
 	if nil != op.CheckWhitelistExistsImpl {
 		return op.CheckWhitelistExistsImpl()
 	}
 
 	panic("Unimplemented")
 }
-func (op *omniProto) SetWhitelistCap(cap int) error {
+func (op *omniProto) SetWhitelistCap(cap int) {
 	if nil != op.SetWhitelistCapImpl {
-		return op.SetWhitelistCapImpl(cap)
+		op.SetWhitelistCapImpl(cap)
 	}
 
 	panic("Unimplemented")
@@ -386,7 +386,7 @@ func (op *omniProto) viewChange(curView uint64) {
 
 	panic("Unimplemented")
 }
-func (op *omniProto) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+func (op *omniProto) getValidatorHandle(id uint64) (handle *pb.PeerID) {
 	if nil != op.getValidatorHandleImpl {
 		return op.getValidatorHandleImpl(id)
 	}

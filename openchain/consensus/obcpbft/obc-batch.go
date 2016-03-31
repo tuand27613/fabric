@@ -78,16 +78,11 @@ func (op *obcBatch) Startup(seqNo uint64, id []byte) {
 func (op *obcBatch) waitForID(config *viper.Viper, startupInfo []byte) {
 	var id uint64
 	var size int
-	var err error
 
 	for { // wait until you have a whitelist
-		size, _ = op.stack.CheckWhitelistExists()
+		size = op.stack.CheckWhitelistExists()
 		if size > 0 { // there is a waitlist so you know your ID
-			id, err = op.stack.GetOwnID()
-			if err != nil {
-				logger.Error(err.Error())
-				panic(err.Error())
-			}
+			id = op.stack.GetOwnID()
 			break
 		}
 		time.Sleep(1 * time.Second)
@@ -154,10 +149,7 @@ func (op *obcBatch) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerID)
 			}
 		}
 	} else if pbftMsg := batchMsg.GetPbftMessage(); pbftMsg != nil {
-		senderID, err := op.stack.GetValidatorID(senderHandle) // who sent this?
-		if err != nil {
-			panic("Cannot map sender's PeerID to a valid replica ID")
-		}
+		senderID := op.stack.GetValidatorID(senderHandle) // who sent this?
 		op.pbft.unlock()
 		op.pbft.receive(pbftMsg, senderID)
 		op.pbft.lock()
@@ -186,10 +178,7 @@ func (op *obcBatch) broadcast(msgPayload []byte) {
 
 // send a message to a specific replica
 func (op *obcBatch) unicast(msgPayload []byte, receiverID uint64) (err error) {
-	receiverHandle, err := op.stack.GetValidatorHandle(receiverID)
-	if err != nil {
-		return
-	}
+	receiverHandle := op.stack.GetValidatorHandle(receiverID)
 	return op.stack.Unicast(op.wrapMessage(msgPayload), receiverHandle)
 }
 
@@ -199,10 +188,7 @@ func (op *obcBatch) sign(msg []byte) ([]byte, error) {
 
 // verify message signature
 func (op *obcBatch) verify(senderID uint64, signature []byte, message []byte) error {
-	senderHandle, err := op.stack.GetValidatorHandle(senderID)
-	if err != nil {
-		return err
-	}
+	senderHandle := op.stack.GetValidatorHandle(senderID)
 	return op.stack.Verify(senderHandle, signature, message)
 }
 
@@ -231,7 +217,7 @@ func (op *obcBatch) viewChange(curView uint64) {
 }
 
 // retrieve a validator's PeerID given its PBFT ID
-func (op *obcBatch) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+func (op *obcBatch) getValidatorHandle(id uint64) (handle *pb.PeerID) {
 	return op.stack.GetValidatorHandle(id)
 }
 
@@ -346,18 +332,12 @@ func (op *obcBatch) Checkpoint(seqNo uint64, id []byte) {
 }
 
 func (op *obcBatch) skipTo(seqNo uint64, id []byte, replicas []uint64, execInfo *ExecutionInfo) {
-	handles, err := op.stack.GetValidatorHandles(replicas)
-	if err != nil {
-		logger.Error(err.Error())
-	}
+	handles := op.stack.GetValidatorHandles(replicas)
 	op.executor.SkipTo(seqNo, id, handles, execInfo)
 }
 
 func (op *obcBatch) validState(seqNo uint64, id []byte, replicas []uint64, execInfo *ExecutionInfo) {
-	handles, err := op.stack.GetValidatorHandles(replicas)
-	if err != nil {
-		logger.Error(err.Error())
-	}
+	handles := op.stack.GetValidatorHandles(replicas)
 	op.executor.ValidState(seqNo, id, handles, execInfo)
 }
 

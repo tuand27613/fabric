@@ -228,7 +228,7 @@ type PeerImpl struct {
 	ledgerWrapper  *ledgerWrapper
 	secHelper      crypto.Peer
 	whitelist      *pb.Whitelist
-	whitelistedMap map[pb.PeerID]int
+	whitelistedMap map[string]int
 }
 
 // NewPeerWithHandler returns a Peer which uses the supplied handler factory function for creating new handlers on new Chat service invocations.
@@ -243,9 +243,10 @@ func NewPeerWithHandler(handlerFact HandlerFactory) (*PeerImpl, error) {
 
 	// is this a peer that's restarting after a crash? if so, load the whitelist
 	peer.whitelist = &pb.Whitelist{Cap: -1,
+		Security:     viper.GetBool("security.enabled"),
 		SortedKeys:   []string{},
 		SortedValues: []*pb.PeerID{}}
-	peer.whitelistedMap = make(map[pb.PeerID]int)
+	peer.whitelistedMap = make(map[string]int)
 	peer.LoadWhitelist()
 
 	// Install security object for peer
@@ -327,8 +328,8 @@ func (p *PeerImpl) PeersDiscovered(peersMessage *pb.PeersMessage) error {
 	for _, peerEndpoint := range peersMessage.Peers {
 		if *getHandlerKeyFromPeerEndpoint(thisPeersEndpoint) == *getHandlerKeyFromPeerEndpoint(peerEndpoint) {
 			// if this is THIS peer's endpoint do nothing
-		} else if _, ok := p.whitelistedMap[*getHandlerKeyFromPeerEndpoint(peerEndpoint)]; ok == false && (len(p.whitelistedMap) > 0) { // prevent outgoing connections
-			// if we have a whitelist *and* this PeerEndpoint.ID is not in it, do NOT connect to it
+		} else if _, ok := p.whitelistedMap[getHandlerKeyFromPeerEndpoint(peerEndpoint).Name]; ok == false && (len(p.whitelistedMap) > 0) { // prevent outgoing connections
+			// if we have a whitelist *and* this PeerEndpoint.ID.Name is not in it, do NOT connect to it
 			peerLogger.Debug("Did not connect to non-whitelisted peer: %v", *getHandlerKeyFromPeerEndpoint(peerEndpoint))
 		} else if _, ok := p.handlerMap.m[*getHandlerKeyFromPeerEndpoint(peerEndpoint)]; ok == false {
 			// start chat with peer
@@ -363,10 +364,11 @@ func (p *PeerImpl) RegisterHandler(messageHandler MessageHandler) error {
 		return newDuplicateHandlerError(messageHandler)
 	}
 	remotePeerEndpoint, _ := messageHandler.To()
-	if _, ok := p.whitelistedMap[*getHandlerKeyFromPeerEndpoint(&remotePeerEndpoint)]; ok == false && (len(p.whitelistedMap) > 0) { // prevent incoming (& outgoing...) connections
-		// if we have a whitelist *and* this PeerEndpoint.ID is not in it, do NOT accept connections from it
-		peerLogger.Debug("Did not accept connection from non-whitelisted peeer: %v", remotePeerEndpoint.ID)
-		return nil
+	if _, ok := p.whitelistedMap[getHandlerKeyFromPeerEndpoint(&remotePeerEndpoint).Name]; ok == false && (len(p.whitelistedMap) > 0) { // prevent incoming (& outgoing...) connections
+		// if we have a whitelist *and* this PeerEndpoint.ID.Name is not in it, do NOT accept connections from it
+		err = fmt.Errorf("Did not accept connection from non-whitelisted peeer: %v", remotePeerEndpoint.ID)
+		peerLogger.Debug(err.Error())
+		return fmt.Errorf(err.Error())
 	}
 	p.handlerMap.m[*key] = messageHandler
 	peerLogger.Debug("Registered handler with key: %s", key)
@@ -429,12 +431,11 @@ func (p *PeerImpl) Broadcast(msg *pb.OpenchainMessage, typ pb.PeerEndpoint_Type)
 	return errorsFromHandlers
 }
 
-// Unicast sends a message to a specific peer.
-func (p *PeerImpl) Unicast(msg *pb.OpenchainMessage, receiverHandle *pb.PeerID) error {
+// Unicast sends a message to a specified peer
+func (p *PeerImpl) Unicast(msg *pb.OpenchainMessage, handle *pb.PeerID) error {
 	p.handlerMap.Lock()
-	msgHandler := p.handlerMap.m[*receiverHandle]
-	//don't lock across SendMessage
-	p.handlerMap.Unlock()
+	msgHandler := p.handlerMap.m[*handle]
+	p.handlerMap.Unlock() // don't lock across SendMessage
 	err := msgHandler.SendMessage(msg)
 	if err != nil {
 		toPeerEndpoint, _ := msgHandler.To()

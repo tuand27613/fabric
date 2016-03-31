@@ -44,11 +44,11 @@ func TestSieveNetwork(t *testing.T) {
 	defer net.stop()
 
 	req1 := createOcMsgWithChainTx(1)
-	broadcaster, _ := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
+	broadcaster := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
 	net.endpoints[1].(*consumerEndpoint).consumer.RecvMsg(req1, broadcaster)
 	net.process()
 	req0 := createOcMsgWithChainTx(2)
-	broadcaster, _ = net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
+	broadcaster = net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
 	net.endpoints[0].(*consumerEndpoint).consumer.RecvMsg(req0, broadcaster)
 	net.process()
 
@@ -110,7 +110,7 @@ func TestSieveNoDecision(t *testing.T) {
 
 	fmt.Printf("DEBUG: filterFn is %p and net is %p\n", net.testnet.filterFn, net.testnet)
 
-	broadcaster, _ := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
+	broadcaster := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
 	net.endpoints[1].(*consumerEndpoint).consumer.RecvMsg(createOcMsgWithChainTx(1), broadcaster)
 
 	go net.processContinually()
@@ -163,7 +163,7 @@ func TestSieveReqBackToBack(t *testing.T) {
 		return payload
 	}
 
-	broadcaster, _ := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
+	broadcaster := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
 	net.endpoints[1].(*consumerEndpoint).consumer.RecvMsg(createOcMsgWithChainTx(1), broadcaster)
 	net.endpoints[1].(*consumerEndpoint).consumer.RecvMsg(createOcMsgWithChainTx(2), broadcaster)
 
@@ -198,12 +198,12 @@ func TestSieveNonDeterministic(t *testing.T) {
 	defer net.stop()
 
 	instResults = []int{1, 2, 3, 4}
-	broadcaster, _ := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
+	broadcaster := net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
 	net.endpoints[1].(*consumerEndpoint).consumer.RecvMsg(createOcMsgWithChainTx(1), broadcaster)
 	net.process()
 
 	instResults = []int{5, 5, 6, 6}
-	broadcaster, _ = net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
+	broadcaster = net.endpoints[generateBroadcaster(validatorCount)].GetOwnHandle()
 	net.endpoints[1].(*consumerEndpoint).consumer.RecvMsg(createOcMsgWithChainTx(2), broadcaster)
 
 	net.process()
@@ -239,7 +239,7 @@ func TestSieveRequestHash(t *testing.T) {
 	}
 
 	r0 := net.endpoints[0].(*consumerEndpoint)
-	r0Handle, _ := r0.GetOwnHandle()
+	r0Handle := r0.GetOwnHandle()
 	r0.consumer.RecvMsg(msg, r0Handle)
 
 	// This used to be enormous, verify that it is short

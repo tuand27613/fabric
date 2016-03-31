@@ -62,84 +62,72 @@ func makeTestEndpoint(id uint64, net *testnet) *testEndpoint {
 	return te
 }
 
-func (te *testEndpoint) GetOwnID() (id uint64, err error) {
-	return te.id, nil
+func (te *testEndpoint) GetOwnID() (id uint64) {
+	return te.id
 }
 
-func (te *testEndpoint) GetOwnHandle() (handle *pb.PeerID, err error) {
-	return &pb.PeerID{Name: fmt.Sprintf("vp%d", te.id)}, nil
+func (te *testEndpoint) GetOwnHandle() (handle *pb.PeerID) {
+	return &pb.PeerID{Name: fmt.Sprintf("vp%d", te.id)}
 }
 
-func (te *testEndpoint) GetValidatorID(handle *pb.PeerID) (id uint64, err error) {
-	if nil == te.net {
-		err = fmt.Errorf("Network not initialized")
-		return
+func (te *testEndpoint) GetValidatorID(handle *pb.PeerID) (id uint64) {
+	if te.net == nil {
+		err := fmt.Errorf("Network not initialized")
+		panic(err.Error())
 	}
 
 	for _, v := range te.net.endpoints {
-		epHandle, _ := v.GetOwnHandle()
+		epHandle := v.GetOwnHandle()
 		if *handle == *epHandle {
-			id, _ = v.GetOwnID()
+			id = v.GetOwnID()
 			return
 		}
 	}
 
-	err = fmt.Errorf("Handle %v not found in network list", handle)
 	return
 }
 
-func (te *testEndpoint) GetValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
-	if nil == te.net {
-		err = fmt.Errorf("Network not initialized")
-		return
+func (te *testEndpoint) GetValidatorHandle(id uint64) (handle *pb.PeerID) {
+	if te.net == nil {
+		err := fmt.Errorf("Network not initialized")
+		panic(err.Error())
 	}
 
-	if int(id) < len(te.net.endpoints) {
-		handle, _ = te.net.endpoints[id].GetOwnHandle()
-		return
-	}
-
-	err = fmt.Errorf("ID %d not found in network list (length of list: %d)", id, len(te.net.endpoints))
+	handle = te.net.endpoints[id].GetOwnHandle()
 	return
 }
 
-func (te *testEndpoint) GetValidatorHandles(ids []uint64) (handles []*pb.PeerID, err error) {
+func (te *testEndpoint) GetValidatorHandles(ids []uint64) (handles []*pb.PeerID) {
 	handles = make([]*pb.PeerID, len(ids))
 	for i, id := range ids {
-		handles[i], err = te.GetValidatorHandle(id)
-		if err != nil {
-			break
-		}
+		handles[i] = te.GetValidatorHandle(id)
 	}
 	return
 }
 
-func (te *testEndpoint) GetConnectedValidators() (handles []*pb.PeerID, err error) {
-	if nil != te.net {
-		err = fmt.Errorf("Network not initialized")
-		return
+func (te *testEndpoint) GetConnectedValidators() (handles []*pb.PeerID) {
+	if te.net == nil {
+		err := fmt.Errorf("Network not initialized")
+		panic(err.Error())
 	}
 
 	handles = make([]*pb.PeerID, len(te.net.endpoints))
 	for i, v := range te.net.endpoints {
-		handles[i], _ = v.GetOwnHandle()
+		handles[i] = v.GetOwnHandle()
 	}
 
 	return
 }
 
-func (te *testEndpoint) CheckWhitelistExists() (size int, err error) {
-	if nil == te.net {
-		err = fmt.Errorf("Network not initialized")
-		return
+func (te *testEndpoint) CheckWhitelistExists() (size int) {
+	if te.net != nil {
+		size = len(te.net.endpoints)
 	}
-	size = len(te.net.endpoints)
 	return
 }
 
-func (te *testEndpoint) SetWhitelistCap(cap int) error {
+func (te *testEndpoint) SetWhitelistCap(cap int) {
 	// no-op
-	return nil
 }
 
 // Broadcast delivers to all endpoints.  In contrast to the stack
@@ -151,10 +139,11 @@ func (te *testEndpoint) Broadcast(msg *pb.OpenchainMessage, peerType pb.PeerEndp
 	return nil
 }
 
-func (te *testEndpoint) Unicast(msg *pb.OpenchainMessage, receiverHandle *pb.PeerID) error {
-	receiverID, err := te.GetValidatorID(receiverHandle)
+func (te *testEndpoint) Unicast(msg *pb.OpenchainMessage, handle *pb.PeerID) error {
+	var err error
+	receiverID := te.GetValidatorID(handle)
 	if err != nil {
-		return fmt.Errorf("Couldn't unicast message to %s: %v", receiverHandle.Name, err)
+		return fmt.Errorf("Couldn't unicast message to %s: %v", handle.Name, err)
 	}
 	internalQueueMessage(te.net.msgs, taggedMsg{int(te.id), int(receiverID), msg.Payload})
 	return nil
@@ -197,13 +186,13 @@ func (net *testnet) broadcastFilter(te *testEndpoint, payload []byte) {
 
 func (net *testnet) deliverFilter(msg taggedMsg, senderID int) {
 	net.debugMsg("TEST: deliver\n")
-	senderHandle, _ := net.endpoints[senderID].GetOwnHandle()
+	senderHandle := net.endpoints[senderID].GetOwnHandle()
 	if msg.dst == -1 {
 		net.debugMsg("TEST: Sending broadcast %v\n", net.endpoints)
 		wg := &sync.WaitGroup{}
 		wg.Add(len(net.endpoints))
 		for i, ep := range net.endpoints {
-			id, _ := ep.GetOwnID()
+			id := ep.GetOwnID()
 			net.debugMsg("TEST: Looping broadcast %d\n", id)
 			lid := i
 			lep := ep

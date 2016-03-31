@@ -66,10 +66,7 @@ type consumerNetwork struct {
 }
 
 func (cnet *consumerNetwork) GetLedgerByPeerID(handle *pb.PeerID) (consensus.ReadOnlyLedger, bool) {
-	id, err := cnet.endpoints[0].GetValidatorID(handle)
-	if nil != err {
-		return nil, false
-	}
+	id := cnet.endpoints[0].GetValidatorID(handle)
 	return cnet.mockLedgers[id], true
 }
 

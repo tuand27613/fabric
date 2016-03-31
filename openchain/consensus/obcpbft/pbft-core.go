@@ -58,7 +58,7 @@ type innerStack interface {
 	validState(seqNo uint64, id []byte, peers []uint64, execInfo *ExecutionInfo)
 	validate(txRaw []byte) error
 	viewChange(curView uint64)
-	getValidatorHandle(id uint64) (handle *protos.PeerID, err error)
+	getValidatorHandle(id uint64) (handle *protos.PeerID)
 	sign(msg []byte) ([]byte, error)
 	verify(senderID uint64, signature []byte, message []byte) error
 }

@@ -94,16 +94,11 @@ func (op *obcSieve) Startup(seqNo uint64, id []byte) {
 func (op *obcSieve) waitForID(config *viper.Viper, startupInfo []byte) {
 	var id uint64
 	var size int
-	var err error
 
 	for { // wait until you have a whitelist
-		size, _ = op.stack.CheckWhitelistExists()
+		size = op.stack.CheckWhitelistExists()
 		if size > 0 { // there is a waitlist so you know your ID
-			id, err = op.stack.GetOwnID()
-			if err != nil {
-				logger.Error(err.Error())
-				panic(err.Error())
-			}
+			id = op.stack.GetOwnID()
 			break
 		}
 		time.Sleep(1 * time.Second)
@@ -143,13 +138,10 @@ func (op *obcSieve) RecvMsg(ocMsg *pb.OpenchainMessage, senderHandle *pb.PeerID)
 		return fmt.Errorf("Unexpected message type: %s", ocMsg.Type)
 	}
 
-	senderID, err := op.stack.GetValidatorID(senderHandle)
-	if err != nil {
-		panic("Cannot map sender's PeerID to a valid replica ID")
-	}
+	senderID := op.stack.GetValidatorID(senderHandle)
 
 	svMsg := &SieveMessage{}
-	err = proto.Unmarshal(ocMsg.Payload, svMsg)
+	err := proto.Unmarshal(ocMsg.Payload, svMsg)
 	if err != nil {
 		err = fmt.Errorf("Could not unmarshal sieve message: %v", ocMsg)
 		logger.Error(err.Error())
@@ -194,10 +186,7 @@ func (op *obcSieve) unicast(msgPayload []byte, receiverID uint64) (err error) {
 		Type:    pb.OpenchainMessage_CONSENSUS,
 		Payload: msgPayload,
 	}
-	receiverHandle, err := op.stack.GetValidatorHandle(receiverID)
-	if err != nil {
-		return
-	}
+	receiverHandle := op.stack.GetValidatorHandle(receiverID)
 	return op.stack.Unicast(ocMsg, receiverHandle)
 }
 
@@ -206,10 +195,7 @@ func (op *obcSieve) sign(msg []byte) ([]byte, error) {
 }
 
 func (op *obcSieve) verify(senderID uint64, signature []byte, message []byte) error {
-	senderHandle, err := op.stack.GetValidatorHandle(senderID)
-	if err != nil {
-		return err
-	}
+	senderHandle := op.stack.GetValidatorHandle(senderID)
 	return op.stack.Verify(senderHandle, signature, message)
 }
 
@@ -234,7 +220,7 @@ func (op *obcSieve) viewChange(newView uint64) {
 }
 
 // retrieve a validator's PeerID given its PBFT ID
-func (op *obcSieve) getValidatorHandle(id uint64) (handle *pb.PeerID, err error) {
+func (op *obcSieve) getValidatorHandle(id uint64) (handle *pb.PeerID) {
 	return op.stack.GetValidatorHandle(id)
 }
 
@@ -687,10 +673,8 @@ func (op *obcSieve) executeVerifySet(vset *VerifySet, seqNo uint64, execInfo *Ex
 	} else {
 		var peers []*pb.PeerID
 		for _, n := range dSet {
-			peer, err := op.stack.GetValidatorHandle(n.ReplicaId)
-			if err == nil {
-				peers = append(peers, peer)
-			}
+			peer := op.stack.GetValidatorHandle(n.ReplicaId)
+			peers = append(peers, peer)
 		}
 
 		decision := dSet[0].ResultDigest
@@ -760,10 +744,7 @@ func (op *obcSieve) executeFlush(flush *Flush) {
 func (op *obcSieve) validState(seqNo uint64, id []byte, replicas []uint64, execInfo *ExecutionInfo) {
 	resultSID := &SieveId{}
 	proto.Unmarshal(id, resultSID)
-	handles, err := op.stack.GetValidatorHandles(replicas)
-	if err != nil {
-		logger.Error(err.Error())
-	}
+	handles := op.stack.GetValidatorHandles(replicas)
 	op.executor.ValidState(resultSID.BlockNumber, resultSID.ObcId, handles, execInfo)
 }
 

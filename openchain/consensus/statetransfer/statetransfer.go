@@ -285,7 +285,7 @@ func ThreadlessNewStateTransferState(config *viper.Viper, stack PartialStack) *S
 	sts.stateTransferListenersLock = &sync.Mutex{}
 
 	sts.stack = stack
-	sts.id, err = stack.GetOwnHandle()
+	sts.id = stack.GetOwnHandle()
 
 	if nil != err {
 		logger.Debug("Error resolving our own PeerID, this shouldn't happen")
@@ -407,10 +407,7 @@ func (sts *StateTransferState) tryOverPeers(passedPeerIDs []*protos.PeerID, do f
 
 	if nil == passedPeerIDs {
 		logger.Debug("%v tryOverPeers, no peerIDs given, discovering", sts.id)
-		peerIDs, err = sts.stack.GetConnectedValidators()
-		if nil != err {
-			return
-		}
+		peerIDs = sts.stack.GetConnectedValidators()
 		logger.Debug("%v discovered %d peerIDs", sts.id, len(peerIDs))
 	}
 

@@ -21,6 +21,7 @@ package util
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/gob"
 	"fmt"
 	"io"
@@ -38,6 +39,11 @@ func ComputeCryptoHash(data []byte) (hash []byte) {
 	hash = make([]byte, 64)
 	sha3.ShakeSum256(hash, data)
 	return
+}
+
+// EncodeToB64 base64-encodes a byte slice
+func EncodeToB64(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
 }
 
 // GenerateUUID returns a UUID based on RFC 4112

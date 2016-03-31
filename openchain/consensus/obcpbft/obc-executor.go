@@ -91,7 +91,7 @@ func NewOBCExecutor(config *viper.Viper, orderer Orderer, stack statetransfer.Pa
 	obcex.threadExit = make(chan struct{})
 	obcex.orderer = orderer
 	obcex.executorStack = stack
-	obcex.id, err = stack.GetOwnHandle()
+	obcex.id = stack.GetOwnHandle()
 	if nil != err {
 		logger.Error("Could not resolve our own PeerID, assigning dummy")
 		obcex.id = &pb.PeerID{Name: "Dummy"}
